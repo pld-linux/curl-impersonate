@@ -1,0 +1,117 @@
+Adapt upstream's bundled "build everything and statically link it" Makefile to
+PLD packaging. Upstream assumes a distro with no system BoringSSL/nghttp2 and
+with libraries under plain "lib"; PLD ships system OpenSSL/nghttp2/zlib/... and
+uses "lib64". This patch makes the build:
+
+  * chrome_libs: build & bundle ONLY the fingerprint-critical dependencies that
+    have no usable PLD counterpart - BoringSSL (the TLS fingerprint) and the
+    pinned/patched nghttp2 (1.63; >=1.65 drops the priority flag), ngtcp2 and
+    nghttp3. The unpatched, fingerprint-irrelevant zlib/zstd/brotli/libidn2 are
+    taken from PLD instead of being rebuilt here.
+
+  * boringssl .patched: strip BoringSSL's own -Werror. With the distro hardening
+    flags injected here, GCC 15 emits false-positive -Wrestrict/-Wstringop-
+    overflow (bogus huge bounds) on its audited memcpy paths; -Werror would make
+    them fatal. Real errors still fail the build.
+
+  * boringssl lib64 alias: curl's configure looks for the --with-openssl libs
+    under lib64, but BoringSSL installs into plain lib - symlink lib64 -> lib.
+
+  * curl configure flags: install libs into lib64 (--libdir), skip docs
+    (--disable-docs; avoids both extra tooling and a man-page clash with the
+    system curl package), and take zlib/zstd/brotli/libidn2 from the system
+    (bare --with-*) instead of the no-longer-built bundled copies.
+
+  * pkg-config / CC: list the bundled nghttp2/ngtcp2/nghttp3 .pc dirs first so
+    they win over the system ones, and carry the bundled lib dirs in CC so the
+    "-L" lands at the front of every link (an LDFLAGS "-L" is reordered after the
+    system paths by libtool). This makes curl link the bundled static BoringSSL
+    and nghttp2/ngtcp2/nghttp3 rather than the system shared libraries.
+
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -83,10 +83,7 @@
+ libidn2_static_libs := $(libidn2_install_dir)/lib/libidn2.a
+ 
+ # Dependencies needed to compile the Chrome version
+-chrome_libs := $(zlib_static_libs) $(zstd_static_libs) $(brotli_static_libs) $(boringssl_static_libs) $(nghttp2_static_libs) $(ngtcp2_static_libs) $(nghttp3_static_libs)
+-ifneq ($(filter linux%,$(host_os)),)
+-chrome_libs += $(libidn2_static_libs)
+-endif
++chrome_libs := $(boringssl_static_libs) $(nghttp2_static_libs) $(ngtcp2_static_libs) $(nghttp3_static_libs)
+ 
+ # Auto-generate Makefile help.
+ # Borrowed from https://marmelab.com/blog/2016/02/29/auto-documented-makefile.html
+@@ -254,6 +251,11 @@
+ 	# mv boringssl boringssl-$(BORING_SSL_COMMIT)
+ 	cd boringssl-$(BORING_SSL_COMMIT)/
+ 	for p in $^; do patch -p1 < $$p; done
++	# GCC 15 emits false-positive -Wrestrict/-Wstringop-overflow (bogus huge
++	# bounds) on boringssl's audited memcpy paths, which its own -Werror turns
++	# fatal. Drop -Werror so they stay non-fatal warnings (real errors still
++	# fail); the distro hardening flags are still applied.
++	sed -i -e '/set(C_CXX_FLAGS/ s/-Werror //' CMakeLists.txt
+ 	touch .patched
+ 
+ $(boringssl_static_libs): boringssl-$(BORING_SSL_COMMIT).zip boringssl-$(BORING_SSL_COMMIT)/.patched
+@@ -453,6 +455,12 @@
+ 
+ # This is a small hack that flags that curl was patched and configured in the "chrome" version
+ $(CURL_VERSION)/.chrome: $(chrome_libs)	$(CURL_VERSION).tar.gz $(CURL_VERSION)/.patched
++	# curl's configure appends the platform libdir suffix (lib64 here) when
++	# locating boringssl via --with-openssl, but it installs into plain lib.
++	# Expose a lib64 alias so curl's link tests (e.g. ECH) find the archives.
++	if test -d "$(boringssl_dir)/lib" && ! test -e "$(boringssl_dir)/lib64"; then \
++		ln -s lib "$(boringssl_dir)/lib64"; \
++	fi
+ 	cd $(CURL_VERSION)
+ 
+ 	# Set up the configure flags to curl.
+@@ -463,7 +471,9 @@
+ 	# https://daniel.haxx.se/blog/2024/01/10/psl-in-curl/
+ 	{ \
+ 	  config_flags="--prefix=@prefix@"; \
+-	  config_flags="$$config_flags --with-brotli=$(brotli_install_dir)"; \
++	  config_flags="$$config_flags --libdir=@libdir@"; \
++	  config_flags="$$config_flags --disable-docs"; \
++	  config_flags="$$config_flags --with-brotli"; \
+ 	  config_flags="$$config_flags --with-nghttp2=$(nghttp2_install_dir)"; \
+ 	  config_flags="$$config_flags --with-ngtcp2=$(ngtcp2_install_dir)"; \
+ 	  config_flags="$$config_flags --with-nghttp3=$(nghttp3_install_dir)"; \
+@@ -475,12 +485,12 @@
+ 	      config_flags="$$config_flags --without-libidn2"; \
+ 	      ;; \
+ 	    *) \
+-	      config_flags="$$config_flags --with-libidn2=$(libidn2_install_dir)"; \
++	      config_flags="$$config_flags --with-libidn2"; \
+ 	      ;; \
+ 	  esac; \
+ 	  config_flags="$$config_flags --with-openssl=$(boringssl_dir)"; \
+-	  config_flags="$$config_flags --with-zlib=$(with_zlib)"; \
+-	  config_flags="$$config_flags --with-zstd=$(with_zstd)"; \
++	  config_flags="$$config_flags --with-zlib"; \
++	  config_flags="$$config_flags --with-zstd"; \
+ 	  config_flags="$$config_flags --without-librtmp"; \
+ 	  config_flags="$$config_flags --disable-ldap --disable-ldaps"; \
+ 	  config_flags="$$config_flags --without-libpsl"; \
+@@ -520,12 +530,18 @@
+ 		esac; \
+ 	}
+ 
++	# PKG_CONFIG_PATH lists the bundled nghttp2/ngtcp2/nghttp3 first so they win
++	# over the system copies; the system default path is left enabled so curl
++	# finds the system brotli/zstd/zlib/libidn2. CC carries the bundled lib dirs
++	# (static .a only) at the front of every link so the bundled boringssl and
++	# nghttp2/ngtcp2/nghttp3 win over the system shared libraries (an LDFLAGS -L
++	# would be reordered after the system paths by libtool).
+ 	DYLD_LIBRARY_PATH="$$lib_path" \
+ 	LD_LIBRARY_PATH="$$lib_path" \
+-	PKG_CONFIG_LIBDIR= \
+-	PKG_CONFIG_PATH="$(ngtcp2_install_dir)/lib/pkgconfig" \
++	PKG_CONFIG_PATH="$(nghttp2_install_dir)/lib/pkgconfig:$(ngtcp2_install_dir)/lib/pkgconfig:$(nghttp3_install_dir)/lib/pkgconfig" \
+ 		./configure \
+ 			 $$config_flags \
++			 CC="$(CC) -L$(boringssl_dir)/lib -L$(nghttp2_install_dir)/lib -L$(ngtcp2_install_dir)/lib -L$(nghttp3_install_dir)/lib" \
+ 			 LIBS="$$add_libs"
+ 
+ 	# Remove possible leftovers from a previous compilation
