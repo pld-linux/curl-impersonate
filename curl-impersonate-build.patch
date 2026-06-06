@@ -17,6 +17,10 @@ uses "lib64". This patch makes the build:
   * boringssl lib64 alias: curl's configure looks for the --with-openssl libs
     under lib64, but BoringSSL installs into plain lib - symlink lib64 -> lib.
 
+  * boringssl on 32-bit x86: its x86 assembly requires SSE2, which is not part
+    of the i686 baseline - build BoringSSL without assembly (-DOPENSSL_NO_ASM)
+    on i?86/i386.
+
   * curl configure flags: install libs into lib64 (--libdir), skip docs
     (--disable-docs; avoids both extra tooling and a man-page clash with the
     system curl package), and take zlib/zstd/brotli/libidn2 from the system
@@ -54,7 +58,31 @@ uses "lib64". This patch makes the build:
  	touch .patched
  
  $(boringssl_static_libs): boringssl-$(BORING_SSL_COMMIT).zip boringssl-$(BORING_SSL_COMMIT)/.patched
-@@ -453,6 +455,12 @@
+@@ -290,6 +292,15 @@
+ 		esac; \
+ 	}
+ 
++	# BoringSSL's x86 assembly requires SSE2, which is not part of the 32-bit
++	# x86 baseline; build it without assembly (pure C) there.
++	{ \
++		cmake_asm_flags=""; \
++		case "$(host_cpu)" in \
++			i?86|i386) cmake_asm_flags="-DOPENSSL_NO_ASM=1" ;; \
++		esac; \
++	}
++
+ 	# The extra CMAKE_C_FLAGS are needed because otherwise boringssl fails to
+ 	# compile in release mode on some systems with gcc 12 (e.g. Fedora).
+ 	# In addition, guard these options with -Wno-unknown-warning-option to
+@@ -303,6 +314,7 @@
+ 			-DCMAKE_SYSTEM_NAME=$$system_name \
+ 			-DCMAKE_SYSTEM_PROCESSOR=$(host_cpu) \
+ 			$$cmake_osx_flags \
++			$$cmake_asm_flags \
+ 			-GNinja \
+ 			..
+ 	@ninja@ -j$(SUBJOBS) crypto ssl
+@@ -453,6 +465,12 @@
  
  # This is a small hack that flags that curl was patched and configured in the "chrome" version
  $(CURL_VERSION)/.chrome: $(chrome_libs)	$(CURL_VERSION).tar.gz $(CURL_VERSION)/.patched
@@ -67,7 +95,7 @@ uses "lib64". This patch makes the build:
  	cd $(CURL_VERSION)
  
  	# Set up the configure flags to curl.
-@@ -463,7 +471,9 @@
+@@ -463,7 +481,9 @@
  	# https://daniel.haxx.se/blog/2024/01/10/psl-in-curl/
  	{ \
  	  config_flags="--prefix=@prefix@"; \
@@ -78,7 +106,7 @@ uses "lib64". This patch makes the build:
  	  config_flags="$$config_flags --with-nghttp2=$(nghttp2_install_dir)"; \
  	  config_flags="$$config_flags --with-ngtcp2=$(ngtcp2_install_dir)"; \
  	  config_flags="$$config_flags --with-nghttp3=$(nghttp3_install_dir)"; \
-@@ -475,12 +485,12 @@
+@@ -475,12 +495,12 @@
  	      config_flags="$$config_flags --without-libidn2"; \
  	      ;; \
  	    *) \
@@ -94,7 +122,7 @@ uses "lib64". This patch makes the build:
  	  config_flags="$$config_flags --without-librtmp"; \
  	  config_flags="$$config_flags --disable-ldap --disable-ldaps"; \
  	  config_flags="$$config_flags --without-libpsl"; \
-@@ -520,12 +530,18 @@
+@@ -520,12 +540,18 @@
  		esac; \
  	}
  

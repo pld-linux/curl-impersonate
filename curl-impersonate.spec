@@ -15,7 +15,7 @@ Summary:	curl that impersonates real browser TLS/HTTP fingerprints
 Summary(pl.UTF-8):	curl podszywający się pod odciski TLS/HTTP prawdziwych przeglądarek
 Name:		curl-impersonate
 Version:	1.5.6
-Release:	1
+Release:	2
 License:	MIT (curl-impersonate, curl, nghttp2/3, ngtcp2), BoringSSL
 Group:		Applications/Networking
 URL:		https://github.com/lexiforest/curl-impersonate
@@ -44,6 +44,9 @@ BuildRequires:	pkgconfig
 BuildRequires:	unzip
 BuildRequires:	zlib-devel
 BuildRequires:	zstd-devel
+# BoringSSL does not support the x32 ABI - it has no getrandom syscall number
+# for it and its #error aborts the build.
+ExcludeArch:	x32
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
