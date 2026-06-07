@@ -1,0 +1,11 @@
+--- curl-impersonate-1.5.6/Makefile.in~	2026-06-07 13:45:26.000000000 +0200
++++ curl-impersonate-1.5.6/Makefile.in	2026-06-07 13:47:55.373899911 +0200
+@@ -246,7 +246,7 @@
+ 		-o boringssl-$(BORING_SSL_COMMIT).zip
+ 
+ # Patch boringssl and use a dummy '.patched' file to mark it patched
+-boringssl-$(BORING_SSL_COMMIT)/.patched: $(srcdir)/patches/boringssl.patch
++boringssl-$(BORING_SSL_COMMIT)/.patched: $(srcdir)/patches/boringssl.patch $(srcdir)/patches/boringssl-x32.patch
+ 	unzip -q -o boringssl-$(BORING_SSL_COMMIT).zip
+ 	# mv boringssl boringssl-$(BORING_SSL_COMMIT)
+ 	cd boringssl-$(BORING_SSL_COMMIT)/

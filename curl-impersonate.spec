@@ -15,7 +15,7 @@ Summary:	curl that impersonates real browser TLS/HTTP fingerprints
 Summary(pl.UTF-8):	curl podszywający się pod odciski TLS/HTTP prawdziwych przeglądarek
 Name:		curl-impersonate
 Version:	1.5.6
-Release:	2
+Release:	3
 License:	MIT (curl-impersonate, curl, nghttp2/3, ngtcp2), BoringSSL
 Group:		Applications/Networking
 URL:		https://github.com/lexiforest/curl-impersonate
@@ -31,7 +31,9 @@ Source4:	https://github.com/ngtcp2/ngtcp2/releases/download/v%{ngtcp2_version}/n
 # Source4-md5:	15881f426f0236956f52b3def11eb9a9
 Source5:	https://github.com/ngtcp2/nghttp3/releases/download/v%{nghttp3_version}/nghttp3-%{nghttp3_version}.tar.bz2
 # Source5-md5:	b1fd62a123652b878efb23fb34a8d5e0
+Source6:	boringssl-x32.patch
 Patch0:		%{name}-build.patch
+Patch1:		x32.patch
 BuildRequires:	autoconf
 BuildRequires:	automake
 BuildRequires:	cmake >= 3.5
@@ -44,9 +46,6 @@ BuildRequires:	pkgconfig
 BuildRequires:	unzip
 BuildRequires:	zlib-devel
 BuildRequires:	zstd-devel
-# BoringSSL does not support the x32 ABI - it has no getrandom syscall number
-# for it and its #error aborts the build.
-ExcludeArch:	x32
 BuildRoot:	%{tmpdir}/%{name}-%{version}-root-%(id -u -n)
 
 %description
@@ -98,10 +97,12 @@ kolidowały ze standardowym pakietem curl-devel.
 %prep
 %setup -q
 %patch -P0 -p1
+%patch -P1 -p1
 
 # Place the pinned dependency archives where upstream's Makefile expects them,
 # so the network-isolated build uses them instead of downloading.
 cp -p %{SOURCE1} %{SOURCE2} %{SOURCE3} %{SOURCE4} %{SOURCE5} .
+cp -p %{SOURCE6} patches/
 
 %build
 %configure

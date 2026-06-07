@@ -1,0 +1,14 @@
+--- boringssl-673e61fc215b178a90c0e67858bbf162c8158993/crypto/rand/getrandom_fillin.h~	2025-03-01 00:12:34.000000000 +0100
++++ boringssl-673e61fc215b178a90c0e67858bbf162c8158993/crypto/rand/getrandom_fillin.h	2026-06-07 13:39:55.581941346 +0200
+@@ -23,7 +23,11 @@
+ #include <sys/syscall.h>
+ 
+ #if defined(OPENSSL_X86_64)
++#if defined(__ILP32__)
++#define EXPECTED_NR_getrandom (__X32_SYSCALL_BIT + 318)
++#else
+ #define EXPECTED_NR_getrandom 318
++#endif
+ #elif defined(OPENSSL_X86)
+ #define EXPECTED_NR_getrandom 355
+ #elif defined(OPENSSL_AARCH64)
